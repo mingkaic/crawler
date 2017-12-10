@@ -1,3 +1,13 @@
-# modify this option file to suit purpose
-depth: 1
-same_host: true
+# purpose: search for audio and visual assets on reddit
+search:
+  depth: 2 # tweak this
+  same_host: false
+  contains_tags:
+    - img
+    - video
+    - audio
+record:
+  tags:
+    - img
+    - source
+  attr: src

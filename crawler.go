@@ -23,9 +23,16 @@ type depthInfo struct {
 	depth uint
 }
 
-type searchOpt struct {
-	MaxDepth uint `yaml:"depth"`
-	SameHost bool `yaml:"same_host"`
+type crawlOpt struct {
+	Search struct { // search constraints
+		MaxDepth     uint     `yaml:"depth"`
+		SameHost     bool     `yaml:"same_host"`
+		ContainsTags []string `yaml:"contains_tags"`
+	}
+	Record struct { // options for recording
+		Tags []string
+		Attr string
+	}
 }
 
 func main() {
@@ -44,10 +51,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("yaml file read error: %v", err)
 	}
-	opt := searchOpt{}
+	opt := crawlOpt{}
 	err = yaml.Unmarshal(options, &opt)
-	fmt.Println("max depth:", opt.MaxDepth)
-	fmt.Println("visit same hostname only:", opt.SameHost)
+	fmt.Println("max depth:", opt.Search.MaxDepth)
+	fmt.Println("visit same hostname only:", opt.Search.SameHost)
+	fmt.Println("a tags must contain the following tags:", opt.Search.ContainsTags)
 	if err != nil {
 		log.Fatalf("yaml option error: %v", err)
 	}
@@ -73,10 +81,11 @@ func main() {
 		}
 	}()
 	for site := range queue {
-		if site.depth <= opt.MaxDepth {
+		if site.depth <= opt.Search.MaxDepth {
 			// propagate to linked sites
 			goCount.Increment() // increment in main in case goroutine completes before main
-			uriEnqueue(site, &opt,
+			fmt.Println("fetching", site.link, "@ depth", site.depth)
+			uriEnqueue(site.link, &opt,
 				func(next_site string) {
 					if !visited.Has(next_site) {
 						visited.Add(next_site) // tag link as visited before to avoid duplicate
@@ -92,18 +101,21 @@ func main() {
 	}
 }
 
-func uriEnqueue(site depthInfo, opt *searchOpt, linkHandle func(string)) {
-	uri := site.link
-	fmt.Println("fetching", uri, "@ depth", site.depth)
+func uriEnqueue(uri string, opt *crawlOpt, linkHandle func(string)) {
 	body, err := request(uri)
 	if err != nil {
 		fmt.Println(err.Error())
 		return
 	}
+	go func() {
+		// record assets
+		attrVals := scrape.FindAttrVals(body, opt.Record.Attr, opt.Record.Tags...)
+		fmt.Println(attrVals)
+	}()
 	findLink := scrape.FindAll("a")
 	links := searchLinks(findLink(body), opt)
 	for _, link := range links {
-		validLink, err := resolveRef(uri, link, opt.SameHost)
+		validLink, err := resolveRef(uri, link, opt.Search.SameHost)
 		if err == nil {
 			linkHandle(validLink)
 		}
@@ -132,9 +144,13 @@ func request(link string) (body *html.Node, err error) {
 	return
 }
 
-func searchLinks(elems []*html.Node, opt *searchOpt) []string {
+func searchLinks(elems []*html.Node, opt *crawlOpt) []string {
 	links := []string{}
+	containment := scrape.FindAll(opt.Search.ContainsTags...)
 	for _, elem := range elems {
+		if len(opt.Search.ContainsTags) > 0 && len(containment(elem)) == 0 {
+			continue
+		}
 		for _, attr := range elem.Attr {
 			if attr.Key == "href" {
 				links = append(links, attr.Val)
@@ -144,7 +160,7 @@ func searchLinks(elems []*html.Node, opt *searchOpt) []string {
 	return links
 }
 
-func resolveRef(base, ref string, sameHost bool) (link string, err error) {
+func resolveRef(base, ref string, SameHost bool) (link string, err error) {
 	normalFlag := purell.FlagsUnsafeGreedy
 	refURL, err := url.Parse(purell.MustNormalizeURLString(ref, normalFlag))
 	if err != nil {
@@ -156,7 +172,7 @@ func resolveRef(base, ref string, sameHost bool) (link string, err error) {
 		hostname := resURL.Hostname()
 		if len(hostname) == 0 {
 			err = fmt.Errorf("invalid uri: %s", link)
-		} else if sameHost && hostname != baseURL.Hostname() {
+		} else if SameHost && hostname != baseURL.Hostname() {
 			err = fmt.Errorf("external hostname: %s", hostname)
 		} else {
 			link = resURL.String()
