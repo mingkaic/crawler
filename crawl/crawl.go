@@ -1,29 +1,26 @@
-//// file: crawler.go
-package main
+//// file: crawl.go
+
+// Package crawl ...
+// Is a web crawler
+package crawl
 
 import (
 	"crypto/tls"
-	"flag"
 	"fmt"
-	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
+	"sync/atomic"
 
 	"github.com/PuerkitoBio/purell"
-	"github.com/mingkaic/crawler/crutils"
-	"github.com/mingkaic/crawler/scrape"
-	"golang.org/x/net/html"
+	"github.com/mingkaic/stew"
 	"gopkg.in/fatih/set.v0"
-	"gopkg.in/yaml.v2"
 )
 
-type depthInfo struct {
-	link  string
-	depth uint
-}
+//// ====== Structures ======
 
-type crawlOpt struct {
+// CrawlOpt ...
+// Is the filter and record parameters
+type CrawlOpt struct {
 	Search struct { // search constraints
 		MaxDepth     uint     `yaml:"depth"`
 		SameHost     bool     `yaml:"same_host"`
@@ -35,46 +32,32 @@ type crawlOpt struct {
 	}
 }
 
-func main() {
-	flag.Parse()
-	args := flag.Args()
-	if len(args) < 1 {
-		log.Fatalf("Specify starting location")
-	}
+// manages the depth information
+type depthInfo struct {
+	link  string
+	depth uint
+}
 
-	// search parameter components
-	cyml := flag.String("cyml", "reddit_crawl.yml", "yml file outlining search constraint")
-	if cyml == nil {
-		log.Fatalf("Constraint file not specified")
-	}
-	options, err := ioutil.ReadFile(*cyml)
-	if err != nil {
-		log.Fatalf("yaml file read error: %v", err)
-	}
-	opt := crawlOpt{}
-	err = yaml.Unmarshal(options, &opt)
-	fmt.Println("max depth:", opt.Search.MaxDepth)
-	fmt.Println("visit same hostname only:", opt.Search.SameHost)
-	fmt.Println("a tags must contain the following tags:", opt.Search.ContainsTags)
-	if err != nil {
-		log.Fatalf("yaml option error: %v", err)
-	}
+type atomicInt int32
 
+//// ====== Public ======
+
+func Crawl(origin string, opt CrawlOpt) {
 	// synchronization components
 	queue := make(chan depthInfo)
 	stopCh := make(chan struct{})
-	goCount := crutils.AtomicInt(0)
+	goCount := atomicInt(0)
 
 	// optimization components
 	visited := set.New()
-	visited.Add(args[0])
+	visited.Add(origin)
 	go func() {
-		queue <- depthInfo{args[0], 0}
+		queue <- depthInfo{origin, 0}
 	}()
 
 	go func() { // termination goroutine
 		for range stopCh {
-			if goCount.Decrement() == 0 { // stop condition
+			if goCount.decrement() == 0 { // stop condition
 				close(queue)
 				close(stopCh)
 			}
@@ -83,13 +66,13 @@ func main() {
 	for site := range queue {
 		if site.depth <= opt.Search.MaxDepth {
 			// propagate to linked sites
-			goCount.Increment() // increment in main in case goroutine completes before main
+			goCount.increment() // increment in main in case goroutine completes before main
 			fmt.Println("fetching", site.link, "@ depth", site.depth)
-			uriEnqueue(site.link, &opt,
+			uriProcess(site.link, &opt,
 				func(next_site string) {
 					if !visited.Has(next_site) {
 						visited.Add(next_site) // tag link as visited before to avoid duplicate
-						goCount.Increment()    // spawning new go routine
+						goCount.increment()    // spawning new go routine
 						go func() {
 							queue <- depthInfo{link: next_site, depth: site.depth + 1}
 							stopCh <- struct{}{} // check termination goroutine for stop condition
@@ -101,19 +84,45 @@ func main() {
 	}
 }
 
-func uriEnqueue(uri string, opt *crawlOpt, linkHandle func(string)) {
-	body, err := request(uri)
+//// ====== Private ======
+
+//// Members of atomicInt
+
+func (c *atomicInt) increment() int32 {
+	return atomic.AddInt32((*int32)(c), 1)
+}
+
+func (c *atomicInt) decrement() int32 {
+	return atomic.AddInt32((*int32)(c), -1)
+}
+
+func (c *atomicInt) get() int32 {
+	return atomic.LoadInt32((*int32)(c))
+}
+
+//// Utilities for Crawl
+
+// query site identified by uri for links,
+// filter and handle links, and record local assets
+func uriProcess(uri string, opt *CrawlOpt, linkHandle func(string)) {
+	// build Stew
+	dom, err := request(uri)
 	if err != nil {
 		fmt.Println(err.Error())
 		return
 	}
+	// process DOM
 	go func() {
 		// record assets
-		attrVals := scrape.FindAttrVals(body, opt.Record.Attr, opt.Record.Tags...)
-		fmt.Println(attrVals)
+		elems := dom.FindAll(opt.Record.Tags...)
+		for _, elem := range elems {
+			attrVal := elem.Attrs[opt.Record.Attr]
+			fmt.Println(attrVal)
+		}
 	}()
-	findLink := scrape.FindAll("a")
-	links := searchLinks(findLink(body), opt)
+	// filter links
+	links := searchLinks(dom.FindAll("a"), opt)
+	// validate links
 	for _, link := range links {
 		validLink, err := resolveRef(uri, link, opt.Search.SameHost)
 		if err == nil {
@@ -122,7 +131,9 @@ func uriEnqueue(uri string, opt *crawlOpt, linkHandle func(string)) {
 	}
 }
 
-func request(link string) (body *html.Node, err error) {
+// todo: make request injectable
+// construct stew dom tree from custom request to link
+func request(link string) (dom *stew.Stew, err error) {
 	// disable ssl verification
 	tlsConfig := &tls.Config{InsecureSkipVerify: true}
 	transport := &http.Transport{TLSClientConfig: tlsConfig}
@@ -138,28 +149,29 @@ func request(link string) (body *html.Node, err error) {
 	if err != nil {
 		return
 	}
-
-	defer resp.Body.Close()
-	body, err = html.Parse(resp.Body)
+	dom = stew.New(resp.Body)
 	return
 }
 
-func searchLinks(elems []*html.Node, opt *crawlOpt) []string {
+// filter link given options
+func searchLinks(elems []*stew.Stew, opt *CrawlOpt) []string {
 	links := []string{}
-	containment := scrape.FindAll(opt.Search.ContainsTags...)
 	for _, elem := range elems {
-		if len(opt.Search.ContainsTags) > 0 && len(containment(elem)) == 0 {
-			continue
-		}
-		for _, attr := range elem.Attr {
-			if attr.Key == "href" {
-				links = append(links, attr.Val)
+		contains := false
+		for _, contTag := range opt.Search.ContainsTags {
+			contains = contains || elem.Descs[contTag] != nil
+			if contains {
+				break
 			}
+		}
+		if len(opt.Search.ContainsTags) == 0 || contains {
+			links = append(links, elem.Attrs["href"]...)
 		}
 	}
 	return links
 }
 
+// validate and normalize links
 func resolveRef(base, ref string, SameHost bool) (link string, err error) {
 	normalFlag := purell.FlagsUnsafeGreedy
 	refURL, err := url.Parse(purell.MustNormalizeURLString(ref, normalFlag))
