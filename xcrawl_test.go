@@ -1,6 +1,6 @@
 //// file: crawl_test.go
 
-package crawl
+package xcrawl
 
 import (
 	"os"
@@ -19,14 +19,10 @@ import (
 //// ====== Globals ======
 
 const sampleYml = `
-search:
-  depth: 10
-  same_host: true
-  contains_tags:
-    - img
-record:
-  tags:
-    - text
+depth: 10
+same_host: true
+contains_tags:
+- img
 `
 
 var expectedCrawl Crawler
@@ -47,27 +43,15 @@ func TestNew(t *testing.T) {
 	crawler := New([]byte(sampleYml))
 
 	// inspect Crawler options
-	if !reflect.DeepEqual(expectedCrawl.Search, crawler.Search) {
-		expect, err := json.Marshal(expectedCrawl.Search)
-		if err != nil {
-			panic(err)
-		}
-		got, err := json.Marshal(crawler.Search)
-		if err != nil {
-			panic(err)
-		}
-		t.Errorf("expecting %s, got %s",
-			string(expect), string(got))
+	expect, err := json.Marshal(expectedCrawl)
+	if err != nil {
+		panic(err)
 	}
-	if !reflect.DeepEqual(expectedCrawl.Record, crawler.Record) {
-		expect, err := json.Marshal(expectedCrawl.Record)
-		if err != nil {
-			panic(err)
-		}
-		got, err := json.Marshal(crawler.Record)
-		if err != nil {
-			panic(err)
-		}
+	got, err := json.Marshal(crawler)
+	if err != nil {
+		panic(err)
+	}
+	if !reflect.DeepEqual(expect, got) {
 		t.Errorf("expecting %s, got %s",
 			string(expect), string(got))
 	}
@@ -98,22 +82,9 @@ func TestCrawl(t *testing.T) {
 
 func setupExpectation() {
 	expectedCrawl = Crawler{
-		Search: struct {
-			MaxDepth     uint     `yaml:"depth"`
-			SameHost     bool     `yaml:"same_host"`
-			ContainsTags []string `yaml:"contains_tags"`
-		}{
-			MaxDepth:     uint(10),
-			SameHost:     true,
-			ContainsTags: []string{"img"},
-		},
-		Record: struct {
-			Tags []string
-			Attr string
-		}{
-			Tags: []string{"text"},
-			Attr: "",
-		},
+		MaxDepth:     uint(10),
+		SameHost:     true,
+		ContainsTags: []string{"img"},
 	}
 
 	sampleSite = gardener.GenerateSite(50)

@@ -2,7 +2,7 @@
 
 // Package crawl ...
 // Is a web crawler
-package crawl
+package xcrawl
 
 import (
 	"crypto/tls"
@@ -19,22 +19,23 @@ import (
 
 //// ====== Structures ======
 
-type ReqFunc func(string)(dom *stew.Stew, err error)
+type ReqFunc func(string) (dom *stew.Stew, err error)
 
 // Crawler ...
 // Is the filter and record parameters
 type Crawler struct {
-	Search struct { // search constraints
-		MaxDepth     uint     `yaml:"depth"`
-		SameHost     bool     `yaml:"same_host"`
-		ContainsTags []string `yaml:"contains_tags"`
-	}
-	Record struct { // options for recording
-		Tags []string
-		Attr string
-	}
-	// injectables (private only)
+	MaxDepth     uint     `yaml:"depth"`
+	SameHost     bool     `yaml:"same_host"`
+	ContainsTags []string `yaml:"contains_tags"`
+	// injectables
 	request ReqFunc
+	record  func(*PageInfo)
+}
+
+type PageInfo struct {
+	DOM  *stew.Stew
+	Link string
+	Refs *set.Set
 }
 
 // manages the depth information
@@ -84,11 +85,11 @@ func (this *Crawler) Crawl(URI string) {
 		}
 	}()
 	for site := range queue {
-		if site.depth <= this.Search.MaxDepth {
+		if site.depth <= this.MaxDepth {
 			// propagate to linked sites
 			goCount.increment() // increment in main in case goroutine completes before main
 			fmt.Println("fetching", site.link, "@ depth", site.depth)
-			this.uriProcess(site.link,
+			page := this.uriProcess(site.link,
 				func(next_site string) {
 					if !visited.Has(next_site) {
 						visited.Add(next_site) // tag link as visited before to avoid duplicate
@@ -100,8 +101,16 @@ func (this *Crawler) Crawl(URI string) {
 					}
 				})
 			stopCh <- struct{}{} // check termination goroutine for stop condition
+
+			if this.record != nil && page != nil {
+				this.record(page)
+			}
 		}
 	}
+}
+
+func (this *Crawler) Record(record func(*PageInfo)) {
+	this.record = record
 }
 
 //// ====== Private ======
@@ -110,31 +119,27 @@ func (this *Crawler) Crawl(URI string) {
 
 // query site identified by uri for links,
 // filter and handle links, and record local assets
-func (this *Crawler) uriProcess(uri string, handleLink func(string)) {
+func (this *Crawler) uriProcess(uri string, handleLink func(string)) *PageInfo {
 	// build Stew
 	dom, err := this.request(uri)
 	if err != nil {
 		fmt.Println(err.Error())
-		return
+		return nil
 	}
-	// process DOM
-	go func() {
-		// record assets
-		elems := dom.FindAll(this.Record.Tags...)
-		for _, elem := range elems {
-			attrVal := elem.Attrs[this.Record.Attr]
-			fmt.Println(attrVal)
-		}
-	}()
 	// filter links
 	links := this.searchLinks(dom.FindAll("a"))
+	refs := set.New()
 	// validate links
 	for _, link := range links {
 		validLink, err := this.resolveRef(uri, link)
 		if err == nil {
-			handleLink(validLink)
+			handleLink(validLink.String())
+		}
+		if validLink != nil {
+			refs.Add(validLink.String())
 		}
 	}
+	return &PageInfo{dom, uri, refs}
 }
 
 // filter link given options
@@ -142,13 +147,13 @@ func (this *Crawler) searchLinks(elems []*stew.Stew) []string {
 	links := []string{}
 	for _, elem := range elems {
 		contains := false
-		for _, contTag := range this.Search.ContainsTags {
+		for _, contTag := range this.ContainsTags {
 			contains = contains || elem.Descs[contTag] != nil
 			if contains {
 				break
 			}
 		}
-		if len(this.Search.ContainsTags) == 0 || contains {
+		if len(this.ContainsTags) == 0 || contains {
 			links = append(links, elem.Attrs["href"]...)
 		}
 	}
@@ -156,7 +161,7 @@ func (this *Crawler) searchLinks(elems []*stew.Stew) []string {
 }
 
 // validate and normalize links
-func (this *Crawler) resolveRef(base, ref string) (link string, err error) {
+func (this *Crawler) resolveRef(base, ref string) (link *url.URL, err error) {
 	normalFlag := purell.FlagsUnsafeGreedy
 	refURL, err := url.Parse(purell.MustNormalizeURLString(ref, normalFlag))
 	if err != nil {
@@ -168,10 +173,11 @@ func (this *Crawler) resolveRef(base, ref string) (link string, err error) {
 		hostname := resURL.Hostname()
 		if len(hostname) == 0 {
 			err = fmt.Errorf("invalid uri: %s", link)
-		} else if this.Search.SameHost && hostname != baseURL.Hostname() {
-			err = fmt.Errorf("external hostname: %s", hostname)
 		} else {
-			link = resURL.String()
+			if this.SameHost && hostname != baseURL.Hostname() {
+				err = fmt.Errorf("external hostname: %s", hostname)
+			}
+			link = resURL
 		}
 	}
 	return
