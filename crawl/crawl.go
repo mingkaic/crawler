@@ -14,13 +14,16 @@ import (
 	"github.com/PuerkitoBio/purell"
 	"github.com/mingkaic/stew"
 	"gopkg.in/fatih/set.v0"
+	"gopkg.in/yaml.v2"
 )
 
 //// ====== Structures ======
 
-// CrawlOpt ...
+type ReqFunc func(string)(dom *stew.Stew, err error)
+
+// Crawler ...
 // Is the filter and record parameters
-type CrawlOpt struct {
+type Crawler struct {
 	Search struct { // search constraints
 		MaxDepth     uint     `yaml:"depth"`
 		SameHost     bool     `yaml:"same_host"`
@@ -30,6 +33,8 @@ type CrawlOpt struct {
 		Tags []string
 		Attr string
 	}
+	// injectables (private only)
+	request ReqFunc
 }
 
 // manages the depth information
@@ -42,7 +47,22 @@ type atomicInt int32
 
 //// ====== Public ======
 
-func Crawl(origin string, opt CrawlOpt) {
+//// Creator & Members for Crawler
+
+func New(ymlParams []byte) *Crawler {
+	crawler := new(Crawler)
+	if err := yaml.Unmarshal(ymlParams, &crawler); err != nil {
+		panic(err)
+	}
+	return crawler
+}
+
+func (this *Crawler) Crawl(URI string) {
+	// resolve uninjected functors
+	if this.request == nil {
+		this.request = request
+	}
+
 	// synchronization components
 	queue := make(chan depthInfo)
 	stopCh := make(chan struct{})
@@ -50,9 +70,9 @@ func Crawl(origin string, opt CrawlOpt) {
 
 	// optimization components
 	visited := set.New()
-	visited.Add(origin)
+	visited.Add(URI)
 	go func() {
-		queue <- depthInfo{origin, 0}
+		queue <- depthInfo{URI, 0}
 	}()
 
 	go func() { // termination goroutine
@@ -64,11 +84,11 @@ func Crawl(origin string, opt CrawlOpt) {
 		}
 	}()
 	for site := range queue {
-		if site.depth <= opt.Search.MaxDepth {
+		if site.depth <= this.Search.MaxDepth {
 			// propagate to linked sites
 			goCount.increment() // increment in main in case goroutine completes before main
 			fmt.Println("fetching", site.link, "@ depth", site.depth)
-			uriProcess(site.link, &opt,
+			this.uriProcess(site.link,
 				func(next_site string) {
 					if !visited.Has(next_site) {
 						visited.Add(next_site) // tag link as visited before to avoid duplicate
@@ -86,6 +106,77 @@ func Crawl(origin string, opt CrawlOpt) {
 
 //// ====== Private ======
 
+//// Private Members for Crawler
+
+// query site identified by uri for links,
+// filter and handle links, and record local assets
+func (this *Crawler) uriProcess(uri string, handleLink func(string)) {
+	// build Stew
+	dom, err := this.request(uri)
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	// process DOM
+	go func() {
+		// record assets
+		elems := dom.FindAll(this.Record.Tags...)
+		for _, elem := range elems {
+			attrVal := elem.Attrs[this.Record.Attr]
+			fmt.Println(attrVal)
+		}
+	}()
+	// filter links
+	links := this.searchLinks(dom.FindAll("a"))
+	// validate links
+	for _, link := range links {
+		validLink, err := this.resolveRef(uri, link)
+		if err == nil {
+			handleLink(validLink)
+		}
+	}
+}
+
+// filter link given options
+func (this *Crawler) searchLinks(elems []*stew.Stew) []string {
+	links := []string{}
+	for _, elem := range elems {
+		contains := false
+		for _, contTag := range this.Search.ContainsTags {
+			contains = contains || elem.Descs[contTag] != nil
+			if contains {
+				break
+			}
+		}
+		if len(this.Search.ContainsTags) == 0 || contains {
+			links = append(links, elem.Attrs["href"]...)
+		}
+	}
+	return links
+}
+
+// validate and normalize links
+func (this *Crawler) resolveRef(base, ref string) (link string, err error) {
+	normalFlag := purell.FlagsUnsafeGreedy
+	refURL, err := url.Parse(purell.MustNormalizeURLString(ref, normalFlag))
+	if err != nil {
+		return
+	}
+	baseURL, err := url.Parse(purell.MustNormalizeURLString(base, normalFlag))
+	if err == nil {
+		resURL := baseURL.ResolveReference(refURL)
+		hostname := resURL.Hostname()
+		if len(hostname) == 0 {
+			err = fmt.Errorf("invalid uri: %s", link)
+		} else if this.Search.SameHost && hostname != baseURL.Hostname() {
+			err = fmt.Errorf("external hostname: %s", hostname)
+		} else {
+			link = resURL.String()
+		}
+	}
+	return
+}
+
 //// Members of atomicInt
 
 func (c *atomicInt) increment() int32 {
@@ -100,38 +191,8 @@ func (c *atomicInt) get() int32 {
 	return atomic.LoadInt32((*int32)(c))
 }
 
-//// Utilities for Crawl
+//// ====== Default Injectables ======
 
-// query site identified by uri for links,
-// filter and handle links, and record local assets
-func uriProcess(uri string, opt *CrawlOpt, linkHandle func(string)) {
-	// build Stew
-	dom, err := request(uri)
-	if err != nil {
-		fmt.Println(err.Error())
-		return
-	}
-	// process DOM
-	go func() {
-		// record assets
-		elems := dom.FindAll(opt.Record.Tags...)
-		for _, elem := range elems {
-			attrVal := elem.Attrs[opt.Record.Attr]
-			fmt.Println(attrVal)
-		}
-	}()
-	// filter links
-	links := searchLinks(dom.FindAll("a"), opt)
-	// validate links
-	for _, link := range links {
-		validLink, err := resolveRef(uri, link, opt.Search.SameHost)
-		if err == nil {
-			linkHandle(validLink)
-		}
-	}
-}
-
-// todo: make request injectable
 // construct stew dom tree from custom request to link
 func request(link string) (dom *stew.Stew, err error) {
 	// disable ssl verification
@@ -150,45 +211,5 @@ func request(link string) (dom *stew.Stew, err error) {
 		return
 	}
 	dom = stew.New(resp.Body)
-	return
-}
-
-// filter link given options
-func searchLinks(elems []*stew.Stew, opt *CrawlOpt) []string {
-	links := []string{}
-	for _, elem := range elems {
-		contains := false
-		for _, contTag := range opt.Search.ContainsTags {
-			contains = contains || elem.Descs[contTag] != nil
-			if contains {
-				break
-			}
-		}
-		if len(opt.Search.ContainsTags) == 0 || contains {
-			links = append(links, elem.Attrs["href"]...)
-		}
-	}
-	return links
-}
-
-// validate and normalize links
-func resolveRef(base, ref string, SameHost bool) (link string, err error) {
-	normalFlag := purell.FlagsUnsafeGreedy
-	refURL, err := url.Parse(purell.MustNormalizeURLString(ref, normalFlag))
-	if err != nil {
-		return
-	}
-	baseURL, err := url.Parse(purell.MustNormalizeURLString(base, normalFlag))
-	if err == nil {
-		resURL := baseURL.ResolveReference(refURL)
-		hostname := resURL.Hostname()
-		if len(hostname) == 0 {
-			err = fmt.Errorf("invalid uri: %s", link)
-		} else if SameHost && hostname != baseURL.Hostname() {
-			err = fmt.Errorf("external hostname: %s", hostname)
-		} else {
-			link = resURL.String()
-		}
-	}
 	return
 }

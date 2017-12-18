@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"log"
 
-	"gopkg.in/yaml.v2"
 	"github.com/mingkaic/xcrawl/crawl"
 	//"github.com/mingkaic/xcrawl/model"
 )
@@ -26,15 +25,12 @@ func main() {
 	//defer model.Db.Close()
 
 	// search parameter components
-	opt := crawl.CrawlOpt{}
 	options, err := ioutil.ReadFile(*cyml)
 	if err != nil {
 		log.Fatalf("yaml read error: %v", err)
 	}
-	if err := yaml.Unmarshal(options, &opt); err != nil {
-		log.Fatalf("unmarshal error: %v", err)
-	}
 
 	// crawl
-	crawl.Crawl(args[0], opt)
+	crawler := crawl.New(options)
+	crawler.Crawl(args[0])
 }
