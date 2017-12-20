@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync"
 	"sync/atomic"
 
 	"github.com/PuerkitoBio/purell"
@@ -19,8 +20,6 @@ import (
 
 //// ====== Structures ======
 
-type ReqFunc func(string) (dom *stew.Stew, err error)
-
 // Crawler ...
 // Is the filter and record parameters
 type Crawler struct {
@@ -28,7 +27,7 @@ type Crawler struct {
 	SameHost     bool     `yaml:"same_host"`
 	ContainsTags []string `yaml:"contains_tags"`
 	// injectables
-	request ReqFunc
+	request func(string) (dom *stew.Stew, err error)
 	record  func(*PageInfo)
 }
 
@@ -66,51 +65,49 @@ func (this *Crawler) Crawl(URI string) {
 
 	// synchronization components
 	queue := make(chan depthInfo)
-	stopCh := make(chan struct{})
-	goCount := atomicInt(0)
+	var wg sync.WaitGroup
 
 	// optimization components
 	visited := set.New()
 	visited.Add(URI)
+	wg.Add(1) // wait until initial uri is processed
 	go func() {
 		queue <- depthInfo{URI, 0}
-	}()
+	}() // not passing queue and URI as argument since this routine is guaranteed to finish before end of channel
 
 	go func() { // termination goroutine
-		for range stopCh {
-			if goCount.decrement() == 0 { // stop condition
-				close(queue)
-				close(stopCh)
-			}
-		}
-	}()
+		wg.Wait()
+		close(queue)
+	}() // not passing anything here because this routine determines the end of channel
 	for site := range queue {
 		if site.depth <= this.MaxDepth {
 			// propagate to linked sites
-			goCount.increment() // increment in main in case goroutine completes before main
-			fmt.Println("fetching", site.link, "@ depth", site.depth)
 			page := this.uriProcess(site.link,
 				func(next_site string) {
 					if !visited.Has(next_site) {
 						visited.Add(next_site) // tag link as visited before to avoid duplicate
-						goCount.increment()    // spawning new go routine
+						wg.Add(1)              // wait until next_site is processed
 						go func() {
 							queue <- depthInfo{link: next_site, depth: site.depth + 1}
-							stopCh <- struct{}{} // check termination goroutine for stop condition
-						}()
+						}() // termination is dependent on this go routine's completion
 					}
 				})
-			stopCh <- struct{}{} // check termination goroutine for stop condition
 
 			if this.record != nil && page != nil {
 				this.record(page)
 			}
 		}
+		wg.Done() // site is processed
 	}
 }
 
 func (this *Crawler) Record(record func(*PageInfo)) {
 	this.record = record
+}
+
+// todo: remove
+func (this *Crawler) Inject(request func(string) (dom *stew.Stew, err error)) {
+	this.request = request
 }
 
 //// ====== Private ======
