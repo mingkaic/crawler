@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
-	"sync/atomic"
 
 	"github.com/PuerkitoBio/purell"
 	"github.com/mingkaic/stew"
@@ -31,6 +30,8 @@ type Crawler struct {
 	record  func(*PageInfo)
 }
 
+// PageInfo ...
+// Represents useful data for a single page
 type PageInfo struct {
 	DOM  *stew.Stew
 	Link string
@@ -42,8 +43,6 @@ type depthInfo struct {
 	link  string
 	depth uint
 }
-
-type atomicInt int32
 
 //// ====== Public ======
 
@@ -87,14 +86,14 @@ func (this *Crawler) Crawl(URI string) {
 					if !visited.Has(next_site) {
 						visited.Add(next_site) // tag link as visited before to avoid duplicate
 						wg.Add(1)              // wait until next_site is processed
-						go func() {
-							queue <- depthInfo{link: next_site, depth: site.depth + 1}
-						}() // termination is dependent on this go routine's completion
+						go func(next_site string, depth uint) {
+							queue <- depthInfo{link: next_site, depth: depth}
+						}(next_site, site.depth + 1) // termination is dependent on this go routine's completion
 					}
 				})
 
 			if this.record != nil && page != nil {
-				this.record(page)
+				go this.record(page)
 			}
 		}
 		wg.Done() // site is processed
@@ -103,11 +102,6 @@ func (this *Crawler) Crawl(URI string) {
 
 func (this *Crawler) Record(record func(*PageInfo)) {
 	this.record = record
-}
-
-// todo: remove
-func (this *Crawler) Inject(request func(string) (dom *stew.Stew, err error)) {
-	this.request = request
 }
 
 //// ====== Private ======
@@ -178,20 +172,6 @@ func (this *Crawler) resolveRef(base, ref string) (link *url.URL, err error) {
 		}
 	}
 	return
-}
-
-//// Members of atomicInt
-
-func (c *atomicInt) increment() int32 {
-	return atomic.AddInt32((*int32)(c), 1)
-}
-
-func (c *atomicInt) decrement() int32 {
-	return atomic.AddInt32((*int32)(c), -1)
-}
-
-func (c *atomicInt) get() int32 {
-	return atomic.LoadInt32((*int32)(c))
 }
 
 //// ====== Default Injectables ======
