@@ -16,7 +16,9 @@ import (
 	"gopkg.in/fatih/set.v0"
 )
 
-//// ====== Globals ======
+// =============================================
+//                    Globals
+// =============================================
 
 const (
 	sampleYml = `
@@ -32,7 +34,9 @@ var expectedCrawl Crawler
 
 var sampleSite *gardener.SiteNode
 
-//// ====== Tests ======
+// =============================================
+//                    Tests
+// =============================================
 
 func TestMain(m *testing.M) {
 	retCode := 0
@@ -132,7 +136,9 @@ func TestCrawlAllHosts(t *testing.T) {
 	}
 }
 
-//// ====== Setup ======
+// =============================================
+//                    Private
+// =============================================
 
 func setupExpectation() {
 	expectedCrawl = Crawler{

@@ -17,7 +17,9 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-//// ====== Structures ======
+// =============================================
+//                    Declarations
+// =============================================
 
 // Crawler ...
 // Is the filter and record parameters
@@ -44,10 +46,14 @@ type depthInfo struct {
 	depth uint
 }
 
-//// ====== Public ======
+// =============================================
+//                    Public
+// =============================================
 
 //// Creator & Members for Crawler
 
+// New ...
+// Marshal yaml options as Crawler parameters
 func New(ymlParams []byte) *Crawler {
 	crawler := new(Crawler)
 	if err := yaml.Unmarshal(ymlParams, &crawler); err != nil {
@@ -56,6 +62,8 @@ func New(ymlParams []byte) *Crawler {
 	return crawler
 }
 
+// Crawl ...
+// Visits all pages starting from input URI
 func (this *Crawler) Crawl(URI string) {
 	// resolve uninjected functors
 	if this.request == nil {
@@ -88,7 +96,7 @@ func (this *Crawler) Crawl(URI string) {
 						wg.Add(1)              // wait until next_site is processed
 						go func(next_site string, depth uint) {
 							queue <- depthInfo{link: next_site, depth: depth}
-						}(next_site, site.depth + 1) // termination is dependent on this go routine's completion
+						}(next_site, site.depth+1) // termination is dependent on this go routine's completion
 					}
 				})
 
@@ -100,11 +108,15 @@ func (this *Crawler) Crawl(URI string) {
 	}
 }
 
+// Record ...
+// Injects record functor
 func (this *Crawler) Record(record func(*PageInfo)) {
 	this.record = record
 }
 
-//// ====== Private ======
+// =============================================
+//                    Private
+// =============================================
 
 //// Private Members for Crawler
 
@@ -174,7 +186,7 @@ func (this *Crawler) resolveRef(base, ref string) (link *url.URL, err error) {
 	return
 }
 
-//// ====== Default Injectables ======
+//// Default Injectables
 
 // construct stew dom tree from custom request to link
 func request(link string) (dom *stew.Stew, err error) {
