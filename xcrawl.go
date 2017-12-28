@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/PuerkitoBio/purell"
+	"github.com/mingkaic/phantomgo"
 	"github.com/mingkaic/stew"
 	"gopkg.in/fatih/set.v0"
 	"gopkg.in/yaml.v2"
@@ -28,8 +29,8 @@ type Crawler struct {
 	SameHost     bool     `yaml:"same_host"`
 	ContainsTags []string `yaml:"contains_tags"`
 	// injectables
-	request func(string) (dom *stew.Stew, err error)
-	record  func(*PageInfo)
+	Request ReqFunc
+	Record  RecFunc
 }
 
 // PageInfo ...
@@ -45,6 +46,10 @@ type depthInfo struct {
 	link  string
 	depth uint
 }
+
+type ReqFunc func(string) (*stew.Stew, error)
+
+type RecFunc func(*sync.WaitGroup, *PageInfo)
 
 // =============================================
 //                    Public
@@ -66,8 +71,8 @@ func New(ymlParams []byte) *Crawler {
 // Visits all pages starting from input URI
 func (this *Crawler) Crawl(URI string) {
 	// resolve uninjected functors
-	if this.request == nil {
-		this.request = request
+	if this.Request == nil {
+		this.Request = StaticRequest
 	}
 
 	// synchronization components
@@ -100,18 +105,60 @@ func (this *Crawler) Crawl(URI string) {
 					}
 				})
 
-			if this.record != nil && page != nil {
-				go this.record(page)
+			if this.Record != nil && page != nil {
+				wg.Add(1) // wait on record
+				go this.Record(&wg, page)
 			}
 		}
 		wg.Done() // site is processed
 	}
 }
 
-// Record ...
-// Injects record functor
-func (this *Crawler) Record(record func(*PageInfo)) {
-	this.record = record
+//// Injectables
+
+// StaticRequest ...
+// Construct stew dom tree from page before javascript execution
+// Default Request Injectable
+func StaticRequest(link string) (dom *stew.Stew, err error) {
+	// disable ssl verification
+	tlsConfig := &tls.Config{InsecureSkipVerify: true}
+	transport := &http.Transport{TLSClientConfig: tlsConfig}
+	client := &http.Client{Transport: transport}
+
+	req, err := http.NewRequest("GET", link, nil)
+	if err != nil {
+		return
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	dom = stew.NewFromRes(resp)
+	return
+}
+
+// GetDynamicRequest ...
+// Returns DynamicRequest, which Construct stew dom from page after javascript execution
+func GetDynamicRequest(execPath string) ReqFunc {
+	browser := phantomgo.NewPhantom(execPath)
+	return func(link string) (dom *stew.Stew, err error) {
+		p := &phantomgo.Param{
+			Method: "GET", //POST or GET ..
+			Url:    link,
+			Header: http.Header{
+				"User-Agent": []string{"Mozilla/5.0"},
+			},
+			UsePhantomJS: true,
+		}
+		resp, err := browser.Download(p)
+		if err != nil {
+			return
+		}
+		dom = stew.NewFromRes(resp)
+		return
+	}
 }
 
 // =============================================
@@ -124,7 +171,7 @@ func (this *Crawler) Record(record func(*PageInfo)) {
 // filter and handle links, and record local assets
 func (this *Crawler) uriProcess(uri string, handleLink func(string)) *PageInfo {
 	// build Stew
-	dom, err := this.request(uri)
+	dom, err := this.Request(uri)
 	if err != nil {
 		fmt.Println(err.Error())
 		return nil
@@ -183,28 +230,5 @@ func (this *Crawler) resolveRef(base, ref string) (link *url.URL, err error) {
 			link = resURL
 		}
 	}
-	return
-}
-
-//// Default Injectables
-
-// construct stew dom tree from custom request to link
-func request(link string) (dom *stew.Stew, err error) {
-	// disable ssl verification
-	tlsConfig := &tls.Config{InsecureSkipVerify: true}
-	transport := &http.Transport{TLSClientConfig: tlsConfig}
-	client := &http.Client{Transport: transport}
-
-	req, err := http.NewRequest("GET", link, nil)
-	if err != nil {
-		return
-	}
-
-	req.Header.Set("User-Agent", "Mozilla/5.0")
-	resp, err := client.Do(req)
-	if err != nil {
-		return
-	}
-	dom = stew.New(resp.Body)
 	return
 }

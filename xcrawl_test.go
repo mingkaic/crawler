@@ -74,7 +74,7 @@ func TestCrawlSameHost(t *testing.T) {
 	crawler := New([]byte(sampleYml))
 	crawler.ContainsTags = []string{}
 	visited := set.NewNonTS()
-	crawler.request = func(link string) (dom *stew.Stew, err error) {
+	crawler.Request = func(link string) (dom *stew.Stew, err error) {
 		visited.Add(link)
 		// generate mock dom
 		page, ok := sampleSite.Info.Pages[link]
@@ -113,7 +113,7 @@ func TestCrawlAllHosts(t *testing.T) {
 	crawler.ContainsTags = []string{}
 	crawler.SameHost = false
 	visited := set.NewNonTS()
-	crawler.request = func(link string) (dom *stew.Stew, err error) {
+	crawler.Request = func(link string) (dom *stew.Stew, err error) {
 		visited.Add(link)
 		// generate mock dom
 		page, ok := sampleSite.Info.Pages[link]
