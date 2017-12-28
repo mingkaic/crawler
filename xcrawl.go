@@ -154,14 +154,11 @@ func StaticRequest(link string) (dom *stew.Stew, err error) {
 // GetDynamicRequest ...
 // Returns DynamicRequest, which Construct stew dom from page after javascript execution
 func GetDynamicRequest(execPath string) ReqFunc {
-	browser := phantomgo.NewPhantom(execPath)
+	browser := phantomgo.NewPhantom(execPath, "Mozilla/5.0")
 	return func(link string) (dom *stew.Stew, err error) {
 		p := &phantomgo.Param{
 			Method: "GET", //POST or GET ..
 			Url:    link,
-			Header: http.Header{
-				"User-Agent": []string{"Mozilla/5.0"},
-			},
 			UsePhantomJS: true,
 		}
 		resp, err := browser.Download(p)
