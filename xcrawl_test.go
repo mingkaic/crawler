@@ -74,7 +74,7 @@ func TestCrawlSameHost(t *testing.T) {
 	crawler := New([]byte(sampleYml))
 	crawler.ContainsTags = []string{}
 	visited := set.NewNonTS()
-	crawler.Request = func(link string) (dom *stew.Stew, err error) {
+	crawler.request = func(link string) (dom *stew.Stew, err error) {
 		visited.Add(link)
 		// generate mock dom
 		page, ok := sampleSite.Info.Pages[link]
@@ -85,7 +85,7 @@ func TestCrawlSameHost(t *testing.T) {
 		}
 		html := gardener.ToHTML(page.Page)
 		var rc io.ReadCloser = &gardener.MockRC{bytes.NewBufferString(html)}
-		dom = stew.New(rc)
+		dom = stew.NewFromReader(rc)
 
 		return
 	}
@@ -113,7 +113,7 @@ func TestCrawlAllHosts(t *testing.T) {
 	crawler.ContainsTags = []string{}
 	crawler.SameHost = false
 	visited := set.NewNonTS()
-	crawler.Request = func(link string) (dom *stew.Stew, err error) {
+	crawler.request = func(link string) (dom *stew.Stew, err error) {
 		visited.Add(link)
 		// generate mock dom
 		page, ok := sampleSite.Info.Pages[link]
@@ -124,7 +124,7 @@ func TestCrawlAllHosts(t *testing.T) {
 		}
 		html := gardener.ToHTML(page.Page)
 		var rc io.ReadCloser = &gardener.MockRC{bytes.NewBufferString(html)}
-		dom = stew.New(rc)
+		dom = stew.NewFromReader(rc)
 
 		return
 	}

@@ -29,8 +29,8 @@ type Crawler struct {
 	SameHost     bool     `yaml:"same_host"`
 	ContainsTags []string `yaml:"contains_tags"`
 	// injectables
-	Request ReqFunc
-	Record  RecFunc
+	request ReqFunc
+	record  RecFunc
 }
 
 // PageInfo ...
@@ -71,8 +71,8 @@ func New(ymlParams []byte) *Crawler {
 // Visits all pages starting from input URI
 func (this *Crawler) Crawl(URI string) {
 	// resolve uninjected functors
-	if this.Request == nil {
-		this.Request = StaticRequest
+	if this.request == nil {
+		this.request = StaticRequest
 	}
 
 	// synchronization components
@@ -105,13 +105,25 @@ func (this *Crawler) Crawl(URI string) {
 					}
 				})
 
-			if this.Record != nil && page != nil {
+			if this.record != nil && page != nil {
 				wg.Add(1) // wait on record
-				go this.Record(&wg, page)
+				go this.record(&wg, page)
 			}
 		}
 		wg.Done() // site is processed
 	}
+}
+
+// InjectReq ...
+// Adds request functor
+func (this *Crawler) InjectReq(req ReqFunc) {
+	this.request = req
+}
+
+// InjectRec ...
+// Adds record functor
+func (this *Crawler) InjectRec(rec RecFunc) {
+	this.record = rec
 }
 
 //// Injectables
@@ -171,7 +183,7 @@ func GetDynamicRequest(execPath string) ReqFunc {
 // filter and handle links, and record local assets
 func (this *Crawler) uriProcess(uri string, handleLink func(string)) *PageInfo {
 	// build Stew
-	dom, err := this.Request(uri)
+	dom, err := this.request(uri)
 	if err != nil {
 		fmt.Println(err.Error())
 		return nil
