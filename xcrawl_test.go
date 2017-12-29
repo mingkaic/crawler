@@ -50,7 +50,7 @@ func TestMain(m *testing.M) {
 // TestNew ...
 // Ensures yaml search options are parsed correctly
 func TestNew(t *testing.T) {
-	crawler := New([]byte(sampleYml))
+	crawler := NewYaml([]byte(sampleYml))
 
 	// inspect Crawler options
 	expect, err := json.Marshal(expectedCrawl)
@@ -71,7 +71,7 @@ func TestNew(t *testing.T) {
 // Ensures crawl visits every site in expected order
 // Visit only if page has same host as root
 func TestCrawlSameHost(t *testing.T) {
-	crawler := New([]byte(sampleYml))
+	crawler := NewYaml([]byte(sampleYml))
 	crawler.ContainsTags = []string{}
 	visited := set.NewNonTS()
 	crawler.request = func(link string) (dom *stew.Stew, err error) {
@@ -89,7 +89,7 @@ func TestCrawlSameHost(t *testing.T) {
 
 		return
 	}
-	crawler.Crawl(sampleSite.FullLink)
+	crawler.Crawl(sampleSite.FullLink, set.New())
 	baseHost := sampleSite.Hostname
 	var sameHost func(*gardener.SiteContent)
 	sameHost = func(page *gardener.SiteContent) {
@@ -109,7 +109,7 @@ func TestCrawlSameHost(t *testing.T) {
 // Ensures crawl visits every site in expected order
 // Visit regardless of page's hostname
 func TestCrawlAllHosts(t *testing.T) {
-	crawler := New([]byte(sampleYml))
+	crawler := NewYaml([]byte(sampleYml))
 	crawler.ContainsTags = []string{}
 	crawler.SameHost = false
 	visited := set.NewNonTS()
@@ -128,7 +128,7 @@ func TestCrawlAllHosts(t *testing.T) {
 
 		return
 	}
-	crawler.Crawl(sampleSite.FullLink)
+	crawler.Crawl(sampleSite.FullLink, set.New())
 	for link, page := range sampleSite.Info.Pages {
 		if !visited.Has(link) {
 			t.Errorf("failed to visit host: %s, linkpath: %s", page.Hostname, page.LinkPath)

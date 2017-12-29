@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"sync"
 
+	"encoding/json"
 	"github.com/PuerkitoBio/purell"
 	"github.com/mingkaic/phantomgo"
 	"github.com/mingkaic/stew"
@@ -30,7 +31,12 @@ type Crawler struct {
 	ContainsTags []string `yaml:"contains_tags"`
 	// injectables
 	request ReqFunc
-	record  RecFunc
+	record  RecFunc // optional for recording page information
+}
+
+type VisitCtx interface {
+	Add(...interface{})
+	Has(...interface{}) bool
 }
 
 // PageInfo ...
@@ -57,9 +63,9 @@ type RecFunc func(*sync.WaitGroup, *PageInfo)
 
 //// Creator & Members for Crawler
 
-// New ...
+// NewYaml ...
 // Marshal yaml options as Crawler parameters
-func New(ymlParams []byte) *Crawler {
+func NewYaml(ymlParams []byte) *Crawler {
 	crawler := new(Crawler)
 	if err := yaml.Unmarshal(ymlParams, &crawler); err != nil {
 		panic(err)
@@ -67,9 +73,19 @@ func New(ymlParams []byte) *Crawler {
 	return crawler
 }
 
+// NewJson ...
+// Marshal json options as Crawler parameters
+func NewJson(jsonParams []byte) *Crawler {
+	crawler := new(Crawler)
+	if err := json.Unmarshal(jsonParams, &crawler); err != nil {
+		panic(err)
+	}
+	return crawler
+}
+
 // Crawl ...
 // Visits all pages starting from input URI
-func (this *Crawler) Crawl(URI string) {
+func (this *Crawler) Crawl(URI string, visited VisitCtx) {
 	// resolve uninjected functors
 	if this.request == nil {
 		this.request = StaticRequest
@@ -80,7 +96,6 @@ func (this *Crawler) Crawl(URI string) {
 	var wg sync.WaitGroup
 
 	// optimization components
-	visited := set.New()
 	visited.Add(URI)
 	wg.Add(1) // wait until initial uri is processed
 	go func() {
@@ -157,8 +172,8 @@ func GetDynamicRequest(execPath string) ReqFunc {
 	browser := phantomgo.NewPhantom(execPath, "Mozilla/5.0")
 	return func(link string) (dom *stew.Stew, err error) {
 		p := &phantomgo.Param{
-			Method: "GET", //POST or GET ..
-			Url:    link,
+			Method:       "GET", //POST or GET ..
+			Url:          link,
 			UsePhantomJS: true,
 		}
 		resp, err := browser.Download(p)
