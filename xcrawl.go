@@ -6,12 +6,12 @@ package xcrawl
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"sync"
 
-	"encoding/json"
 	"github.com/PuerkitoBio/purell"
 	"github.com/mingkaic/phantomgo"
 	"github.com/mingkaic/stew"
@@ -26,9 +26,9 @@ import (
 // Crawler ...
 // Is the filter and record parameters
 type Crawler struct {
-	MaxDepth     uint     `yaml:"depth"`
-	SameHost     bool     `yaml:"same_host"`
-	ContainsTags []string `yaml:"contains_tags"`
+	MaxDepth     uint     `yaml:"depth",json:"depth"`
+	SameHost     bool     `yaml:"same_host",json:"sameHost"`
+	ContainsTags []string `yaml:"contains_tags",json:"containsTags"`
 	// injectables
 	request ReqFunc
 	record  RecFunc // optional for recording page information

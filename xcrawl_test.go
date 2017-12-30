@@ -39,9 +39,10 @@ var sampleSite *gardener.SiteNode
 // =============================================
 
 func TestMain(m *testing.M) {
+	gard := gardener.New()
 	retCode := 0
 	for i := 0; i < N_TESTS && retCode == 0; i++ { // repeat all tests because of randomness
-		setupExpectation()
+		setupExpectation(gard)
 		retCode = m.Run()
 	}
 	os.Exit(retCode)
@@ -91,15 +92,15 @@ func TestCrawlSameHost(t *testing.T) {
 	}
 	crawler.Crawl(sampleSite.FullLink, set.New())
 	baseHost := sampleSite.Hostname
-	var sameHost func(*gardener.SiteContent)
-	sameHost = func(page *gardener.SiteContent) {
+	var sameHost func(*gardener.PageNode)
+	sameHost = func(page *gardener.PageNode) {
 		if !visited.Has(page.FullLink) {
 			t.Errorf("failed to visit link %s, %s", page.Hostname, page.LinkPath)
 		}
 		for _, ref := range page.Refs {
 			sNode := (*ref).(gardener.SiteNode)
 			if sNode.Hostname == baseHost {
-				sameHost(sNode.SiteContent)
+				sameHost(sNode.PageNode)
 			}
 		}
 	}
@@ -140,12 +141,12 @@ func TestCrawlAllHosts(t *testing.T) {
 //                    Private
 // =============================================
 
-func setupExpectation() {
+func setupExpectation(gard *gardener.Gardener) {
 	expectedCrawl = Crawler{
 		MaxDepth:     uint(100),
 		SameHost:     true,
 		ContainsTags: []string{"img"},
 	}
 
-	sampleSite = gardener.GenerateSite(50)
+	sampleSite = gard.GenerateSite(50)
 }
