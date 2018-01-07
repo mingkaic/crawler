@@ -237,11 +237,19 @@ func (this *Crawler) searchLinks(elems []*stew.Stew) []string {
 // validate and normalize links
 func (this *Crawler) resolveRef(base, ref string) (link *url.URL, err error) {
 	normalFlag := purell.FlagsUnsafeGreedy
-	refURL, err := url.Parse(purell.MustNormalizeURLString(ref, normalFlag))
+	result, err := purell.NormalizeURLString(ref, normalFlag)
 	if err != nil {
 		return
 	}
-	baseURL, err := url.Parse(purell.MustNormalizeURLString(base, normalFlag))
+	refURL, err := url.Parse(result)
+	if err != nil {
+		return
+	}
+	baseRes, err := purell.NormalizeURLString(base, normalFlag)
+	if err != nil {
+		return
+	}
+	baseURL, err := url.Parse(baseRes)
 	if err == nil {
 		resURL := baseURL.ResolveReference(refURL)
 		hostname := resURL.Hostname()
