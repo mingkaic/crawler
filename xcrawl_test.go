@@ -13,7 +13,6 @@ import (
 
 	"github.com/mingkaic/gardener"
 	"github.com/mingkaic/stew"
-	"gopkg.in/fatih/set.v0"
 )
 
 // =============================================
@@ -74,9 +73,9 @@ func TestNew(t *testing.T) {
 func TestCrawlSameHost(t *testing.T) {
 	crawler := NewYaml([]byte(sampleYml))
 	crawler.ContainsTags = []string{}
-	visited := set.NewNonTS()
+	visited := make(map[string]struct{})
 	crawler.request = func(link string) (dom *stew.Stew, err error) {
-		visited.Add(link)
+		visited[link] = struct{}{}
 		// generate mock dom
 		page, ok := sampleSite.Info.Pages[link]
 		// ensure link in expected links
@@ -90,15 +89,15 @@ func TestCrawlSameHost(t *testing.T) {
 
 		return
 	}
-	crawler.Crawl(sampleSite.FullLink, set.New())
+	crawler.Crawl(sampleSite.FullLink, make(map[string]struct{}))
 	baseHost := sampleSite.Hostname
 	var sameHost func(*gardener.PageNode)
 	sameHost = func(page *gardener.PageNode) {
-		if !visited.Has(page.FullLink) {
+		if _, ok := visited[page.FullLink]; !ok {
 			t.Errorf("failed to visit link %s, %s", page.Hostname, page.LinkPath)
 		}
 		for _, ref := range page.Refs {
-			sNode := (*ref).(gardener.SiteNode)
+			sNode := ref.(*gardener.SiteNode)
 			if sNode.Hostname == baseHost {
 				sameHost(sNode.PageNode)
 			}
@@ -113,9 +112,9 @@ func TestCrawlAllHosts(t *testing.T) {
 	crawler := NewYaml([]byte(sampleYml))
 	crawler.ContainsTags = []string{}
 	crawler.SameHost = false
-	visited := set.NewNonTS()
+	visited := make(map[string]struct{})
 	crawler.request = func(link string) (dom *stew.Stew, err error) {
-		visited.Add(link)
+		visited[link] = struct{}{}
 		// generate mock dom
 		page, ok := sampleSite.Info.Pages[link]
 		// ensure link in expected links
@@ -129,9 +128,9 @@ func TestCrawlAllHosts(t *testing.T) {
 
 		return
 	}
-	crawler.Crawl(sampleSite.FullLink, set.New())
+	crawler.Crawl(sampleSite.FullLink, make(map[string]struct{}))
 	for link, page := range sampleSite.Info.Pages {
-		if !visited.Has(link) {
+		if _, ok := visited[link]; !ok {
 			t.Errorf("failed to visit host: %s, linkpath: %s", page.Hostname, page.LinkPath)
 		}
 	}

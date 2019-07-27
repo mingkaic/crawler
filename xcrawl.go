@@ -15,7 +15,6 @@ import (
 	"github.com/PuerkitoBio/purell"
 	"github.com/mingkaic/phantomgo"
 	"github.com/mingkaic/stew"
-	"gopkg.in/fatih/set.v0"
 	"gopkg.in/yaml.v2"
 )
 
@@ -34,17 +33,12 @@ type Crawler struct {
 	record  RecFunc // optional for recording page information
 }
 
-type VisitCtx interface {
-	Add(...interface{})
-	Has(...interface{}) bool
-}
-
 // PageInfo ...
 // Represents useful data for a single page
 type PageInfo struct {
 	DOM  *stew.Stew
 	Link string
-	Refs *set.Set
+	Refs map[string]struct{}
 }
 
 // manages the depth information
@@ -85,7 +79,7 @@ func NewJson(jsonParams []byte) *Crawler {
 
 // Crawl ...
 // Visits all pages starting from input URI
-func (this *Crawler) Crawl(URI string, visited VisitCtx) {
+func (this *Crawler) Crawl(URI string, visited map[string]struct{}) {
 	// resolve uninjected functors
 	if this.request == nil {
 		this.request = StaticRequest
@@ -96,7 +90,7 @@ func (this *Crawler) Crawl(URI string, visited VisitCtx) {
 	var wg sync.WaitGroup
 
 	// optimization components
-	visited.Add(URI)
+	visited[URI] = struct{}{}
 	wg.Add(1) // wait until initial uri is processed
 	go func() {
 		queue <- depthInfo{URI, 0}
@@ -111,9 +105,9 @@ func (this *Crawler) Crawl(URI string, visited VisitCtx) {
 			// propagate to linked sites
 			page := this.uriProcess(site.link,
 				func(next_site string) {
-					if !visited.Has(next_site) {
-						visited.Add(next_site) // tag link as visited before to avoid duplicate
-						wg.Add(1)              // wait until next_site is processed
+					if _, ok := visited[next_site]; !ok {
+						visited[next_site] = struct{}{} // tag link as visited before to avoid duplicate
+						wg.Add(1)                       // wait until next_site is processed
 						go func(next_site string, depth uint) {
 							queue <- depthInfo{link: next_site, depth: depth}
 						}(next_site, site.depth+1) // termination is dependent on this go routine's completion
@@ -202,7 +196,7 @@ func (this *Crawler) uriProcess(uri string, handleLink func(string)) *PageInfo {
 	}
 	// filter links
 	links := this.searchLinks(dom.FindAll("a"))
-	refs := set.New()
+	refs := make(map[string]struct{})
 	// validate links
 	for _, link := range links {
 		validLink, err := this.resolveRef(uri, link)
@@ -210,7 +204,7 @@ func (this *Crawler) uriProcess(uri string, handleLink func(string)) *PageInfo {
 			handleLink(validLink.String())
 		}
 		if validLink != nil {
-			refs.Add(validLink.String())
+			refs[validLink.String()] = struct{}{}
 		}
 	}
 	return &PageInfo{dom, uri, refs}
